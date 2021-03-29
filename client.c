@@ -12,8 +12,8 @@
 #include <strings.h>
 
 /* for MAC OS execution */
-#define _XOPEN_SOURCE  500
-#include <unistd.h>
+// #define _XOPEN_SOURCE  500
+// #include <unistd.h>
 
 void error(char *msg)
 {
