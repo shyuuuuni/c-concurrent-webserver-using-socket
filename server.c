@@ -1,10 +1,10 @@
 /**
- *  @file    Concurrent-Web-Server.c
- *  @brief   The web server that parses the HTTP request from the browser, 
+ *  @file   Concurrent-Web-Server.c
+ *  @brief  he web server that parses the HTTP request from the browser, 
  *          creates an HTTP response message consisting of the requested file
  *          preceded by header lines, then sends the response
  *          directly to the client
- *  @author  Seunghyun Kim
+ *  @author Seunghyun Kim
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -23,7 +23,9 @@
 #define _XOPEN_SOURCE  500
 #include <unistd.h>
 
+#define MIN_PORT 0
 #define MAX_PORT 65535
+#define BUFSIZE 1024
 
 void error(char *msg);
 
@@ -35,85 +37,133 @@ void error(char *msg);
  */
 int main(int argc, char *argv[])
 {
-  /** Descriptors return from socket and accept system calls*/
-  int sockfd, newsockfd,
-      portno; /** port number */
-  socklen_t clilen;
   
-  char buffer[256];
+  int server_socket, /** Descriptors return from socket()*/
+      client_socket,  /** Descriptors return from accept()*/
+      portno, /** Server port number*/
+      nbytes, /** Bytes read or write*/
+      response_length; /** Length of Response message*/
+
+  socklen_t client_address_length;  /** Length of lient-socket address */
   
-  /*sockaddr_in: Structure Containing an Internet Address*/
+  char buffer[BUFSIZE]; /** Request buffer*/
+  char* response; /* The response message*/
+  
+  /** 
+   *  Structure containing an Internet address
+   *  struct sockaddr_in:
+   *  1) sin_family: Protocol family
+   *  2) sin_port:   16bits port number
+   *  3) sin_addr:   32bits Host IP address
+   *  4) sin_zero:   Dummy data (fill with 0)
+  */
   struct sockaddr_in serv_addr, cli_addr;
-  
-  int n;
+
   /**
-   *  Verify that the argument is a valid input.
-   *  1.  Check the arguments contain port number.
-   *  2.  The port number is valid  in the range 0~65535,
-   *      but the well-known port range 0~1023 can't be used.
+   *  Verify that the argument is a valid input
+   *  1)  Check the arguments contain port number
+   *  2)  The port number is valid  in the range 0~65535,
+   *      but the well-known port range 0~1023 can't be used
    */
-  if (argc < 2) {
+  if (argc < 2) { /* The arguments does not contain port number*/
     fprintf(stderr,"ERROR, no port provided\n");
     exit(1);
   } else {
-    portno = atoi(argv[1]);
-    if (0 <= portno && portno < 1024) { /* well known port except*/
+    portno = atoi(argv[1]); /* convert string to integer*/
+
+    if (MIN_PORT <= portno && portno < 1024) { /* Well-known port*/
       fprintf(stderr, 
               "WARNING, %d is in well-known port range", portno);
       exit(1);
-    } else if (MAX_PORT < portno || portno < 0) { /* portno should in 0~65535*/
+    } else if (MAX_PORT < portno || portno < MIN_PORT) { /* Out of range*/
       fprintf(stderr, "ERROR, %d is not a valid port", portno);
       exit(1);
-    } else {
+    } else {  /* Valid arguments*/
       printf("valid port : %d\n", portno);
     }
   }
   
-  /*Create a new socket
-    AF_INET: Address Domain is Internet 
-    SOCK_STREAM: Socket Type is STREAM Socket */
-  sockfd = socket(AF_INET, SOCK_STREAM, 0);
-  if (sockfd < 0) 
+  /**
+   *  Create a server socket
+   *  socket(int domain, int type, int protocol) function:
+   *  1) domain = AF_INET: Protocol family is IPv4
+   *  2) type   = SOCK_STREAM: Protocol type is TCP/IP
+   *  3) socket function returns -1 if failed to open socket
+   */ 
+  server_socket = socket(AF_INET, SOCK_STREAM, 0);
+  if (server_socket < 0) { /* Failed to create socket*/
     error("ERROR opening socket");
+  }
+
+  /* Initialize the serv_addr*/
+  bzero((char *) &serv_addr, sizeof(serv_addr)); /* Fill serv_addr with 0*/
+
+  /* INADDR_ANY: Bind socket to all available interfaces*/
+  serv_addr.sin_addr.s_addr = INADDR_ANY;
+  serv_addr.sin_family = AF_INET; /* AF_INET: Protocol type is TCP/IP*/
+  serv_addr.sin_port = htons(portno); /* Convert host to network byte order*/
   
-  bzero((char *) &serv_addr, sizeof(serv_addr));
-  // portno = atoi(argv[1]); //atoi converts from String to Integer
-  serv_addr.sin_family = AF_INET;
-  serv_addr.sin_addr.s_addr = INADDR_ANY; //for the server the IP address is always the address that the server is running on
-  serv_addr.sin_port = htons(portno); //convert from host to network byte order
-  
-  if (bind(sockfd, (struct sockaddr *) &serv_addr, sizeof(serv_addr)) < 0) //Bind the socket to the server address
+  /**
+   *  Bind the socket to the server address
+   *  bind function returns -1 if failed to bind address
+   */
+  if (bind(server_socket,
+          (struct sockaddr *) &serv_addr,
+          sizeof(serv_addr)) < 0) { /* Failed to bind socket*/
     error("ERROR on binding");
+  }
   
-  listen(sockfd,5); // Listen for socket connections. Backlog queue (connections to wait) is 5
+  /* Listen for socket connections. Backlog queue (connections to wait) is 5*/
+  listen(server_socket,5);
   
-  clilen = sizeof(cli_addr);
-  /*accept function: 
-    1) Block until a new connection is established
-    2) the new socket descriptor will be used for subsequent communication with the newly connected client.
+  client_address_length = sizeof(cli_addr);
+  /**
+   *  Accept connect request
+   *  1)  Block until a new connection is established
+   *  2)  The new socket descriptor will be used for subsequent communication
+   *      with the newly connected client.
+   *  accept function returns -1 if failed to accept
   */
-  newsockfd = accept(sockfd, (struct sockaddr *) &cli_addr, &clilen);
-  if (newsockfd < 0) 
+  client_socket = accept(server_socket,
+                        (struct sockaddr *) &cli_addr,
+                        &client_address_length);
+  if (client_socket < 0) {  /* Failed to accept client*/
     error("ERROR on accept");
+  }
   
-  bzero(buffer,256);
-  n = read(newsockfd,buffer,255); //Read is a block function. It will read at most 255 bytes
-  if (n < 0) error("ERROR reading from socket");
-    printf("Here is the message: %s\n",buffer);
+  bzero(buffer, BUFSIZE); /* Clear buffer*/
+
+  /**
+   * Read is a block function. So, waiting for client's request
+   * It will read at most BUFSIZE-1 bytes
+   */
+  nbytes = read(client_socket, buffer, BUFSIZE);
+  if (nbytes < 0) { /* Failed to read*/
+    error("ERROR reading from socket");
+  }
+    printf("Here is the message:\n%s\n",buffer);
   
-  n = write(newsockfd,"I got your message",18); //NOTE: write function returns the number of bytes actually sent out �> this might be less than the number you told it to send
-  if (n < 0) error("ERROR writing to socket");
+
+  response = "Response message!";
+  response_length = strlen(response);
+
+  /* Send response message to client */
+  nbytes = write(client_socket, response, response_length);
+  if (nbytes < 0) { /* Failed to write */
+    error("ERROR writing to socket");
+  }
   
-  close(sockfd);
-  close(newsockfd);
+  /* Stop socket connection*/
+  close(server_socket);
+  close(client_socket);
   
   return 0; 
 }
 
 /**
- *  @brief This is error handler function.
- *        Print the error message and exit process.
- *  @param msg The String of the error message
+ *  @brief  This is error handler function.
+ *          Print the error message and exit process.
+ *  @param msg The string of the error message
  *  @return  Return nothing
  */
 void error(char *msg)
