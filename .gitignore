@@ -3,6 +3,9 @@
 # test execution file
 a.out
 
-# vscode configuration file
+# vscode conf
 .vscode
 *.json
+
+# document conf
+.DS_Store
