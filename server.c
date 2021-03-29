@@ -1,17 +1,21 @@
-/* 
-  A simple server in the internet domain using TCP
-  Usage:./server port (E.g. ./server 10000 )
-*/
+/**
+ * @file    Concurrent-Web-Server.c
+ * @brief   The web server that parses the HTTP request from the browser, 
+ *          creates an HTTP response message consisting of the requested file
+ *          preceded by header lines, then sends the response
+ *          directly to the client.
+ * @author  Seunghyun Kim
+ */
 #include <stdio.h>
-#include <sys/types.h>   // definitions of a number of data types used in socket.h and netinet/in.h
+#include <sys/types.h>   /* definitions of a number of data types used in socket.h and netinet/in.h */
 #include <sys/socket.h>  // definitions of structures needed for sockets, e.g. sockaddr
 #include <netinet/in.h>  // constants and structures needed for internet domain addresses, e.g. sockaddr_in
 #include <stdlib.h>
 #include <strings.h>
 
 /* for MAC OS execution */
-// #define _XOPEN_SOURCE  500
-// #include <unistd.h>
+#define _XOPEN_SOURCE  500
+#include <unistd.h>
 
 void error(char *msg)
 {
@@ -19,6 +23,12 @@ void error(char *msg)
   exit(1);
 }
 
+/**
+ * @brief This is the main function of Concurrent-Web-Server.
+ * @param argc The number of arguments inputed to main function.
+ * @param argv The arguments. argv[0]: execute command, argv[1]: port-number
+ * @return Execution success status.
+ */
 int main(int argc, char *argv[])
 {
   int sockfd, newsockfd; //descriptors rturn from socket and accept system calls
