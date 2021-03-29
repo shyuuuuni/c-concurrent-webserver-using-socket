@@ -1,38 +1,43 @@
 /**
- * @file    Concurrent-Web-Server.c
- * @brief   The web server that parses the HTTP request from the browser, 
+ *  @file    Concurrent-Web-Server.c
+ *  @brief   The web server that parses the HTTP request from the browser, 
  *          creates an HTTP response message consisting of the requested file
  *          preceded by header lines, then sends the response
- *          directly to the client.
- * @author  Seunghyun Kim
+ *          directly to the client
+ *  @author  Seunghyun Kim
  */
 #include <stdio.h>
-#include <sys/types.h>   /* definitions of a number of data types used in socket.h and netinet/in.h */
-#include <sys/socket.h>  // definitions of structures needed for sockets, e.g. sockaddr
-#include <netinet/in.h>  // constants and structures needed for internet domain addresses, e.g. sockaddr_in
 #include <stdlib.h>
 #include <strings.h>
+/**
+ * sys/types.h:   definitions of a number of data types
+ *                used in socket.h and netinet/in.h
+ * sys/socket.h:  definitions of structures needed for sockets
+ * netinet/in.h:  constants and structures needed for internet domain addresses
+ */
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
 
 /* for MAC OS execution */
 #define _XOPEN_SOURCE  500
 #include <unistd.h>
 
-void error(char *msg)
-{
-  perror(msg);
-  exit(1);
-}
+#define MAX_PORT 65535
+
+void error(char *msg);
 
 /**
- * @brief This is the main function of Concurrent-Web-Server.
- * @param argc The number of arguments inputed to main function.
- * @param argv The arguments. argv[0]: execute command, argv[1]: port-number
- * @return Execution success status.
+ *  @brief This is the main function of Concurrent-Web-Server
+ *  @param argc The number of arguments inputed to main function
+ *  @param argv The arguments. argv[0]: execute command, argv[1]: port-number
+ *  @return Execution success status
  */
 int main(int argc, char *argv[])
 {
-  int sockfd, newsockfd; //descriptors rturn from socket and accept system calls
-  int portno; // port number
+  /** Descriptors return from socket and accept system calls*/
+  int sockfd, newsockfd,
+      portno; /** port number */
   socklen_t clilen;
   
   char buffer[256];
@@ -41,9 +46,27 @@ int main(int argc, char *argv[])
   struct sockaddr_in serv_addr, cli_addr;
   
   int n;
+  /**
+   *  Verify that the argument is a valid input.
+   *  1.  Check the arguments contain port number.
+   *  2.  The port number is valid  in the range 0~65535,
+   *      but the well-known port range 0~1023 can't be used.
+   */
   if (argc < 2) {
     fprintf(stderr,"ERROR, no port provided\n");
     exit(1);
+  } else {
+    portno = atoi(argv[1]);
+    if (0 <= portno && portno < 1024) { /* well known port except*/
+      fprintf(stderr, 
+              "WARNING, %d is in well-known port range", portno);
+      exit(1);
+    } else if (MAX_PORT < portno || portno < 0) { /* portno should in 0~65535*/
+      fprintf(stderr, "ERROR, %d is not a valid port", portno);
+      exit(1);
+    } else {
+      printf("valid port : %d\n", portno);
+    }
   }
   
   /*Create a new socket
@@ -54,7 +77,7 @@ int main(int argc, char *argv[])
     error("ERROR opening socket");
   
   bzero((char *) &serv_addr, sizeof(serv_addr));
-  portno = atoi(argv[1]); //atoi converts from String to Integer
+  // portno = atoi(argv[1]); //atoi converts from String to Integer
   serv_addr.sin_family = AF_INET;
   serv_addr.sin_addr.s_addr = INADDR_ANY; //for the server the IP address is always the address that the server is running on
   serv_addr.sin_port = htons(portno); //convert from host to network byte order
@@ -85,4 +108,16 @@ int main(int argc, char *argv[])
   close(newsockfd);
   
   return 0; 
+}
+
+/**
+ *  @brief This is error handler function.
+ *        Print the error message and exit process.
+ *  @param msg The String of the error message
+ *  @return  Return nothing
+ */
+void error(char *msg)
+{
+  perror(msg);
+  exit(1);
 }
