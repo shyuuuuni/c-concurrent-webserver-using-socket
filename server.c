@@ -73,7 +73,8 @@ int main(int argc, char *argv[])
 
     if (MIN_PORT <= portno && portno < 1024) { /* Well-known port*/
       fprintf(stderr, 
-              "WARNING, %d is in well-known port range", portno);
+              "WARNING, %d is in well-known port range",
+              portno);
       exit(1);
     } else if (MAX_PORT < portno || portno < MIN_PORT) { /* Out of range*/
       fprintf(stderr, "ERROR, %d is not a valid port", portno);
