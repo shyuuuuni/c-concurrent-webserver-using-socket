@@ -1,7 +1,9 @@
 # gitignore for Computer Network Project 1
 
 # test execution file
-a.out
+*.o
+*.out
+server
 
 # vscode conf
 .vscode
