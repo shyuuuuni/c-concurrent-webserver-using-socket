@@ -19,15 +19,19 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 
+#define SUCCESS_RESULT 0
+#define FAILURE_RESULT -1
+#define MIN_PORT 0
+#define MAX_PORT 65535
+#define BUFFER_SIZE 1024
+
 /* for MAC OS execution */
 #define _XOPEN_SOURCE  500
 #include <unistd.h>
 
-#define MIN_PORT 0
-#define MAX_PORT 65535
-#define BUFSIZE 1024
-
 void error(char *msg);
+int ResponseHeader(int client_socket);
+int HttpResponse(int client_socket, char* buffer, char* html_file);
 
 /**
  *  @brief This is the main function of Concurrent-Web-Server
@@ -37,7 +41,6 @@ void error(char *msg);
  */
 int main(int argc, char *argv[])
 {
-  
   int server_socket, /** Descriptors return from socket()*/
       client_socket,  /** Descriptors return from accept()*/
       portno, /** Server port number*/
@@ -46,9 +49,11 @@ int main(int argc, char *argv[])
 
   socklen_t client_address_length;  /** Length of lient-socket address */
   
-  char buffer[BUFSIZE]; /** Request buffer*/
-  char* response; /* The response message*/
-  
+  char buffer[BUFFER_SIZE];
+
+  char  *response_header,
+        *response_content;
+
   /** 
    *  Structure containing an Internet address
    *  struct sockaddr_in:
@@ -73,14 +78,14 @@ int main(int argc, char *argv[])
 
     if (MIN_PORT <= portno && portno < 1024) { /* Well-known port*/
       fprintf(stderr, 
-              "WARNING, %d is in well-known port range",
+              "WARNING, %d is in well-known port range.",
               portno);
       exit(1);
     } else if (MAX_PORT < portno || portno < MIN_PORT) { /* Out of range*/
-      fprintf(stderr, "ERROR, %d is not a valid port", portno);
+      fprintf(stderr, "ERROR, %d is unexpected port number.", portno);
       exit(1);
     } else {  /* Valid arguments*/
-      printf("valid port : %d\n", portno);
+      printf("Waiting for client request at port %d\n", portno);
     }
   }
   
@@ -93,7 +98,7 @@ int main(int argc, char *argv[])
    */ 
   server_socket = socket(AF_INET, SOCK_STREAM, 0);
   if (server_socket < 0) { /* Failed to create socket*/
-    error("ERROR opening socket");
+    error("ERROR during opening server socket.");
   }
 
   /* Initialize the serv_addr*/
@@ -129,36 +134,31 @@ int main(int argc, char *argv[])
                         (struct sockaddr *) &cli_addr,
                         &client_address_length);
   if (client_socket < 0) {  /* Failed to accept client*/
-    error("ERROR on accept");
+    error("ERROR during accept client socket.");
   }
   
-  bzero(buffer, BUFSIZE); /* Clear buffer*/
-
+  memset(buffer,0x00,BUFFER_SIZE); /* Clear buffer*/
+  
   /**
    * Read is a block function. So, waiting for client's request
-   * It will read at most BUFSIZE-1 bytes
+   * It will read at most BUFFER_SIZE-1 bytes
    */
-  nbytes = read(client_socket, buffer, BUFSIZE);
+  nbytes = read(client_socket, buffer, BUFFER_SIZE);
   if (nbytes < 0) { /* Failed to read*/
-    error("ERROR reading from socket");
+    error("ERROR during reading request from client");
+  } else {
+    printf("SUCCESS reading request from client.\n");
   }
-    printf("Here is the message:\n%s\n",buffer);
-  
 
-  response = "Response message!";
-  response_length = strlen(response);
+  /* Send response to client*/
+  ResponseHeader(client_socket);
+  HttpResponse(client_socket, buffer, "index.html");
 
-  /* Send response message to client */
-  nbytes = write(client_socket, response, response_length);
-  if (nbytes < 0) { /* Failed to write */
-    error("ERROR writing to socket");
-  }
-  
   /* Stop socket connection*/
   close(server_socket);
   close(client_socket);
   
-  return 0; 
+  return SUCCESS_RESULT; 
 }
 
 /**
@@ -171,4 +171,56 @@ void error(char *msg)
 {
   perror(msg);
   exit(1);
+}
+
+int ResponseHeader(int client_socket) {
+  char *response_header;
+  int response_header_size,
+      header_bytes;
+
+  response_header /* Here is the response header*/
+  = "HTTP/1.0 200 OK\n"
+    "Content-type: text/html\n"
+    "\n";
+
+  response_header_size = strlen(response_header);
+  
+  /* Send response header message to client*/
+  header_bytes = write(client_socket, response_header, response_header_size);
+  if (header_bytes < 0) { /* Failed to write*/
+    error("ERROR during sending header to client");
+  }
+
+  printf("SUCCESS sending response header to client.\n");
+  return SUCCESS_RESULT;
+}
+
+/**
+ *  @brief  This is HTML responser function.
+ *          Read the file and response to the client.
+ *  @param  html_file The request file name.
+ *  @return Return bytes of the response message.
+ */
+int HttpResponse(int client_socket, char* buffer, char* html_file) {
+  FILE *pFile = fopen(html_file, "r"); /* Response file pointer*/
+  int byte_sum = 0, /** Total response bytes*/
+      data_bytes = 0,
+      buffer_length;
+
+  while(feof(pFile) == 0) {
+    memset(buffer,0x00,BUFFER_SIZE);
+    fgets(buffer,BUFFER_SIZE,pFile);
+    
+    buffer_length = strlen(buffer);
+    data_bytes = write(client_socket, buffer, buffer_length);
+
+    if (data_bytes < 0) { /* Failed to write*/
+      error("ERROR during sending data to client.");
+    } else {
+      byte_sum += data_bytes;
+    }
+  }
+
+  printf("SUCCESS sending response data to client.\n");
+  return byte_sum;
 }
