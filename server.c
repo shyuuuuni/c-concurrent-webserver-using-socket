@@ -30,8 +30,11 @@
 #include <unistd.h>
 
 void error(char *msg);
+int SetupServerSocket(void);
+int GetPortNumber(int argc, char *argv[]);
+int ListenRequest(int client_socket, char *buffer);
 int ResponseHeader(int client_socket);
-int HttpResponse(int client_socket, char* buffer, char* html_file);
+int HtmlResponse(int client_socket, char* buffer, char* html_file);
 
 /**
  *  @brief This is the main function of Concurrent-Web-Server
@@ -44,8 +47,7 @@ int main(int argc, char *argv[])
   int server_socket, /** Descriptors return from socket()*/
       client_socket,  /** Descriptors return from accept()*/
       portno, /** Server port number*/
-      nbytes, /** Bytes read or write*/
-      response_length; /** Length of Response message*/
+      nbytes; /** Bytes read or write*/
 
   socklen_t client_address_length;  /** Length of lient-socket address */
   
@@ -63,31 +65,8 @@ int main(int argc, char *argv[])
    *  4) sin_zero:   Dummy data (fill with 0)
   */
   struct sockaddr_in serv_addr, cli_addr;
-
-  /**
-   *  Verify that the argument is a valid input
-   *  1)  Check the arguments contain port number
-   *  2)  The port number is valid  in the range 0~65535,
-   *      but the well-known port range 0~1023 can't be used
-   */
-  if (argc < 2) { /* The arguments does not contain port number*/
-    fprintf(stderr,"ERROR, no port provided\n");
-    exit(1);
-  } else {
-    portno = atoi(argv[1]); /* convert string to integer*/
-
-    if (MIN_PORT <= portno && portno < 1024) { /* Well-known port*/
-      fprintf(stderr, 
-              "WARNING, %d is in well-known port range.",
-              portno);
-      exit(1);
-    } else if (MAX_PORT < portno || portno < MIN_PORT) { /* Out of range*/
-      fprintf(stderr, "ERROR, %d is unexpected port number.", portno);
-      exit(1);
-    } else {  /* Valid arguments*/
-      printf("Waiting for client request at port %d\n", portno);
-    }
-  }
+  
+  portno = GetPortNumber(argc, argv);
   
   /**
    *  Create a server socket
@@ -101,8 +80,7 @@ int main(int argc, char *argv[])
     error("ERROR during opening server socket.");
   }
 
-  /* Initialize the serv_addr*/
-  bzero((char *) &serv_addr, sizeof(serv_addr)); /* Fill serv_addr with 0*/
+  memset(&serv_addr, 0, sizeof(serv_addr)); /* Fill serv_addr with 0*/
 
   /* INADDR_ANY: Bind socket to all available interfaces*/
   serv_addr.sin_addr.s_addr = INADDR_ANY;
@@ -116,8 +94,9 @@ int main(int argc, char *argv[])
   if (bind(server_socket,
           (struct sockaddr *) &serv_addr,
           sizeof(serv_addr)) < 0) { /* Failed to bind socket*/
-    error("ERROR on binding");
+    error("ERROR during binding the server socket.");
   }
+  printf("SUCCESS binding the server socket.\n");
   
   /* Listen for socket connections. Backlog queue (connections to wait) is 5*/
   listen(server_socket,5);
@@ -137,27 +116,20 @@ int main(int argc, char *argv[])
     error("ERROR during accept client socket.");
   }
   
-  memset(buffer,0x00,BUFFER_SIZE); /* Clear buffer*/
-  
-  /**
-   * Read is a block function. So, waiting for client's request
-   * It will read at most BUFFER_SIZE-1 bytes
-   */
-  nbytes = read(client_socket, buffer, BUFFER_SIZE);
-  if (nbytes < 0) { /* Failed to read*/
-    error("ERROR during reading request from client");
-  } else {
-    printf("SUCCESS reading request from client.\n");
-  }
+  /* Get request from the client*/
+  ListenRequest(client_socket, buffer);
 
   /* Send response to client*/
   ResponseHeader(client_socket);
-  HttpResponse(client_socket, buffer, "index.html");
+  HtmlResponse(client_socket, buffer, "index.html");
 
   /* Stop socket connection*/
   close(server_socket);
+  printf("SUCCESS closing the server socket.\n");
   close(client_socket);
+  printf("SUCCESS closing the client socket.\n");
   
+  printf("SUCCESS stop the web server.\n");
   return SUCCESS_RESULT; 
 }
 
@@ -173,6 +145,68 @@ void error(char *msg)
   exit(1);
 }
 
+/**
+ *  @brief  This is a function that checks arguments of the main function.
+ *  @param  argc  The number of arguments.
+ *  @param  argv  The arguments.
+ *  @return Return port number if argument is valid.
+ */
+int GetPortNumber(int argc, char* argv[]) {
+  int port;
+
+  /**
+   *  Verify that the argument is a valid input
+   *  1)  Check the arguments contain port number
+   *  2)  The port number is valid in the range 0~65535,
+   *      but the well-known port range 0~1023 can't be used
+   */
+  if (argc < 2) { /* The arguments does not contain port number*/
+    fprintf(stderr, "ERROR during starting server. Check the port number.\n");
+    exit(1);
+  } else {
+    port = atoi(argv[1]); /* convert string to integer*/
+
+    if (MIN_PORT <= port && port < 1024) { /* Well-known port*/
+      fprintf(stderr, 
+              "WARNING, %d is in well-known port range.",
+              port);
+      exit(1);
+    } else if (MAX_PORT < port || port < MIN_PORT) { /* Out of range*/
+      fprintf(stderr, "ERROR, %d is unexpected port number.", port);
+      exit(1);
+    }
+
+  printf("Waiting for client request at port %d\n", port);
+  return port;
+}
+
+/**
+ *  @brief  This is HTTP listener function.
+ *  @param  client_socket Request from the client socket.
+ *  @param  buffer  The buffer to read from the html file.
+ *  @return Return 0 if successful.
+ */
+int ListenRequest(int client_socket, char *buffer) {
+  int request_bytes;
+
+  memset(buffer,0x00,BUFFER_SIZE); /* Clear buffer*/
+  
+  /* Read request from the client socket.*/
+  request_bytes = read(client_socket, buffer, BUFFER_SIZE);
+
+  if (request_bytes < 0) { /* Failed to read*/
+    error("ERROR during reading request from client");
+  }
+
+  printf("SUCCESS reading request from client.\n");
+  return SUCCESS_RESULT;
+}
+
+/**
+ *  @brief  This responses the http header function.
+ *  @param  client_socket Request from the client socket.
+ *  @return Return 0 if successful.
+ */ 
 int ResponseHeader(int client_socket) {
   char *response_header;
   int response_header_size,
@@ -198,10 +232,12 @@ int ResponseHeader(int client_socket) {
 /**
  *  @brief  This is HTML responser function.
  *          Read the file and response to the client.
+ *  @param  client_socket Request from the client socket.
+ *  @param  buffer  The buffer to read from the html file.
  *  @param  html_file The request file name.
  *  @return Return bytes of the response message.
  */
-int HttpResponse(int client_socket, char* buffer, char* html_file) {
+int HtmlResponse(int client_socket, char* buffer, char* html_file) {
   FILE *pFile = fopen(html_file, "r"); /* Response file pointer*/
   int byte_sum = 0, /** Total response bytes*/
       data_bytes = 0,
@@ -224,3 +260,4 @@ int HttpResponse(int client_socket, char* buffer, char* html_file) {
   printf("SUCCESS sending response data to client.\n");
   return byte_sum;
 }
+
