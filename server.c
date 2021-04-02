@@ -22,41 +22,68 @@
 
 #define SUCCESS_RESULT 0
 #define FAILURE_RESULT -1
+
 #define MIN_PORT 0
 #define MAX_PORT 65535
+
 #define MAX_LINE 255
 #define BUFFER_SIZE 1024
 
-/* GET /index.html HTTP/1.1 */
-typedef struct {
+#define File_t int
+#define UNKNOWN_FILE -1
+#define NO_FILE 0
+#define HTML_FILE 1
+#define GIF_FILE 2
+#define JPEG_FILE 3
+#define MP3_FILE 4
+#define PDF_FILE 5
+
+/**
+ *  @brief  The http request header line message. 
+ *          Struct contains "action" "location" "http_version" 
+ *          (eg. GET /index.html HTTP/1.1)
+ */
+typedef struct http_request_line {
   char* action; /** request message*/
   char* location; /** request location*/
   char* http_version; /** HTTP version*/
-} http_request_header;
+} http_request_line;
 
-/* HTTP/1.1 200 OK */
-typedef struct {
+/**
+ *  @brief  The http response header line message. 
+ *          Struct contains "http_version" "code" "status" 
+ *          (eg. HTTP/1.1 200 OK)
+ */
+typedef struct http_response_line {
   char* http_version; /** HTTP version*/
   int code; /** response code*/
   char* status; /** response status*/
-} http_response_header;
+} http_response_line;
 
-/* field: data */
-typedef struct {
-  char* field;
-  char* data;
-} http_message_body;
+/**
+ *  @brief  The http body message struct. 
+ *          Struct contains "field":"data" 
+ *          (eg. Host: localhost:10000)
+ */
+typedef struct http_message {
+  char* field;  /** Field name*/
+  char* data; /** Field value*/
+} http_message;
 
 /* for MAC OS execution */
-// #define _XOPEN_SOURCE  500
-// #include <unistd.h>
+#define _XOPEN_SOURCE  500
+#include <unistd.h>
 
 void error(char *msg);
 int GetPortNumber(int argc, char *argv[]);
 int SetupServerSocket(int portno);
 int ListenRequest(int client_socket, char *buffer);
-int ParseHTTPRequest(http_request_header* request_header, http_message_body request_body[], char *buffer);
-int ResponseHeader(int client_socket);
+int ParseHTTPRequest(http_request_line* req_header_line, http_message request_body[],
+                    char *buffer);
+int BuildResponse(int client_socket, http_request_line* req_header_line,
+                  http_message request_body[], char *buffer);
+int ResponseHeader(int client_socket, char* http_version, int code);
+int ResponseBody(int client_socket, char* buffer, char* filesrc, File_t filetype);
 int HtmlResponse(int client_socket, char* buffer, char* html_file);
 
 /**
@@ -72,17 +99,19 @@ int main(int argc, char *argv[])
       portno, /** Server port number*/
       request_body_line; /** Number of request body lines*/
 
-  char buffer[BUFFER_SIZE];
+  socklen_t client_address_length;  /** Length of client-socket address*/
+  struct sockaddr_in cli_addr;  /** The client socket address*/
 
-  socklen_t client_address_length;  /** Length of lient-socket address*/
-  struct sockaddr_in cli_addr;
+  http_request_line req_header_line;   /** The request header message*/
+  http_message request_body[MAX_LINE]; /** The request body message*/
 
-  http_request_header request_header;
-  http_response_header response_header;
-
-  http_message_body request_body[MAX_LINE];
-  http_message_body response_body[MAX_LINE];
+  File_t request_file;
+  char *filename, *filetype;
+  char  filesrc[BUFFER_SIZE],
+        input_buffer[BUFFER_SIZE],
+        output_buffer[BUFFER_SIZE];
   
+
   /* Server start*/
   portno = GetPortNumber(argc, argv); /* Check arguments and return port number*/
   
@@ -91,7 +120,7 @@ int main(int argc, char *argv[])
   
   /* Listen for socket connections. Backlog queue (connections to wait) is 5*/
   listen(server_socket,5);
-  
+
   client_address_length = sizeof(cli_addr);
   /*
    *  Accept connect request
@@ -108,23 +137,23 @@ int main(int argc, char *argv[])
   }
   
   /* Get request from the client*/
-  ListenRequest(client_socket, buffer);
+  ListenRequest(client_socket, input_buffer);
 
   /* Parse request message to variables*/
-  request_body_line = ParseHTTPRequest(&request_header, request_body, buffer);
-
-  // test
-  printf("Request Header:\n");
-  printf("\n%s %s %s\n", request_header.action, request_header.location, request_header.http_version);
-  printf("Request Body:\n");
-  for(int i = 0; i < request_body_line; i++) {
-    printf("\n%s:%s", request_body[i].field, request_body[i].data);
+  request_body_line = ParseHTTPRequest(&req_header_line, request_body, input_buffer);
+  if (request_body_line < 0) {
+    error("ERROR request_body_line is invalid.");
+  } else {
+    printf("SUCCESS getting request body lines.\n");
   }
-  printf("\n");
 
-  /* Send response to client*/
-  ResponseHeader(client_socket);
-  HtmlResponse(client_socket, buffer, "index.html");
+  /* Build response by request and send the response message*/
+  if (BuildResponse(client_socket, &req_header_line, request_body, output_buffer)
+        != SUCCESS_RESULT) {
+          error("ERROR during building response."); /* Fail response*/
+  } else {
+    printf("SUCCESS finishing the connection...\n");  /* Success response*/
+  }
 
   /* Stop socket connection*/
   close(server_socket);
@@ -257,18 +286,29 @@ int ListenRequest(int client_socket, char *buffer) {
 }
 
 /**
- * 
+ *  @brief  This function parses buffer to http-request-header and
+ *          http-request-body.
+ *  @param  req_header_line  The filled request header pointer.
+ *  @param  request_body  The filled request body pointer.
+ *  @param  buffer  Total request message from client.
+ *  @return Returns number of request body lines.
  */
-int ParseHTTPRequest(http_request_header* request_header, http_message_body request_body[], char *buffer) {
+int ParseHTTPRequest(http_request_line* req_header_line,
+                    http_message request_body[],
+                    char *buffer) {
   int request_body_line = 0;  /* The number of request lines*/
   char  *token,
         *rest_buffer;
 
   /* The http request header message*/
   token = strtok_r(buffer,"\n", &rest_buffer);
-  request_header->action = strtok(token," ");
-  request_header->location = strtok(NULL," ");
-  request_header->http_version = strtok(NULL," ");
+  if (token[strlen(token) - 1] == '\r') {
+    token[strlen(token) - 1] = '\0';
+  }
+
+  req_header_line->action = strtok(token," ");
+  req_header_line->location = strtok(NULL," ");
+  req_header_line->http_version = strtok(NULL," ");
 
   for(request_body_line = 0; token != NULL; request_body_line++) {
     token = strtok_r(rest_buffer, "\n", &rest_buffer);
@@ -280,20 +320,113 @@ int ParseHTTPRequest(http_request_header* request_header, http_message_body requ
 }
 
 /**
+ *  @brief  This function parses buffer to http-request-header and
+ *          http-request-body.
+ *  @param  req_header_line  The request header pointer.
+ *  @param  request_body  The request body pointer. Use this data
+ *                        if request message is needed.
+ *  @param  buffer  Total request message from client.
+ *  @return Returns number of request body lines.
+ */
+int BuildResponse(int client_socket, http_request_line* req_header_line, http_message request_body[],
+                  char *buffer) {
+  int bytes = 0,  /** Response message's bytes*/
+      code; /** Response status code*/
+  char  *filename, *filetype;
+  char  filesrc[BUFFER_SIZE];
+  char delimiters[] = {'.'};
+  File_t request_file;  /** Request file type*/
+
+  /* Save original file source*/
+  strcpy(filesrc, req_header_line->location + 1);
+
+  if (strcmp(req_header_line->location, "/") == 0) { /* Input is {IP}:{port}*/
+    request_file = NO_FILE;
+  } else if (strchr(req_header_line->location, '.') == NULL) { /* Has no type*/
+    filename = filesrc;
+    filetype = NULL;
+    request_file = UNKNOWN_FILE;
+  } else {
+    /* Divide file source into {filename}.{filetype}*/
+    filename = strtok_r(req_header_line->location, delimiters, &filetype);
+
+    /* Ccheck request file type*/
+    if (strcmp(filetype, "html") == 0) {
+      request_file = HTML_FILE;
+    } else if (strcmp(filetype, "gif") == 0) {
+      request_file = GIF_FILE;
+    } else if (strcmp(filetype, "jpeg") == 0) {
+      request_file = JPEG_FILE;
+    } else if (strcmp(filetype, "mp3") == 0) {
+      request_file = MP3_FILE;
+    } else if (strcmp(filetype, "pdf") == 0) {
+      request_file = PDF_FILE;
+    } else {
+      request_file = UNKNOWN_FILE;
+    }
+  }
+
+  if (strcmp(req_header_line->action, "GET") == 0) {
+    /* GET method inputed*/
+
+    /* Set status code by request file*/
+    if (request_file == NO_FILE) {
+      /* Route to 'index.html', 301 Moved Permanetly*/
+      printf("RESPONSE route to \"/index.html\"\n");
+      code = 301;
+      request_file = HTML_FILE;
+      strcpy(filesrc, "index.html");
+    } else if (access(filesrc, F_OK) != -1) {
+      /* Exist the request file, 200 OK*/
+      printf("RESPONSE \"%s\" exists\n", filesrc);
+      code = 200;
+    } else {
+      /* 404 Not Found*/
+      printf("RESPONSE \"%s\" does not exists\n", filesrc);
+      code = 404;
+      request_file = HTML_FILE;
+      strcpy(filesrc, "404-Not-Found.html");
+    }
+
+    /* Send response message*/
+    if (ResponseHeader(client_socket, req_header_line->http_version, code)
+        != SUCCESS_RESULT) {
+          error("ERROR during sending response header.");
+        }
+    bytes = ResponseBody(client_socket, buffer, filesrc, request_file);
+    printf("RESPONSE body:: %d bytes\n", bytes);
+  } else if (strcmp(req_header_line->action, "POST") == 0) {
+    /* POST method inputed*/
+  } else {  /* 400 Bad Request*/
+    error("ERROR request header is invalid action.");
+  }
+
+  return SUCCESS_RESULT;
+}
+
+/**
  *  @brief  This responses the http header function.
  *  @param  client_socket Request from the client socket.
  *  @return Return 0 if successful.
  */ 
-int ResponseHeader(int client_socket) {
-  char *response_header;
+int ResponseHeader(int client_socket, char* http_version, int code) {
+  char response_header[BUFFER_SIZE];
+  char *comment;
   int response_header_size,
       header_bytes;
 
-  response_header /* Here is the response header*/
-  = "HTTP/1.0 200 OK\n"
-    "Content-type: text/html\n"
-    "\n";
+  if (code == 200) {
+    comment = "OK";
+  } else if (code == 301) {
+    comment = "Moved Permanently";
+  } else if (code == 400) {
+    comment = "Bad Request";
+  } else if (code == 404) {
+    comment = "Not Found";
+  }
 
+  sprintf(response_header, "%s %d %s\n\n", http_version, code, comment);
+  printf("RESPONSE %s", response_header);
   response_header_size = strlen(response_header);
   
   /* Send response header message to client*/
@@ -307,10 +440,32 @@ int ResponseHeader(int client_socket) {
 }
 
 /**
+ *  @brief  This routes the function that sends response body by content type.
+ *  @param  client_socket  Request from the client socket.
+ *  @param  buffer  The buffer to write response body.
+ *  @param  filesrc  The source of existing file.
+ *  @param  filetype  The content type of the file.
+ *  @return Return bytes of the response message.
+ */
+int ResponseBody(int client_socket, char* buffer, char* filesrc,
+                    File_t filetype) {
+  int response_bytes = 0;
+  printf("Request {%s} by method {%d}\n", filesrc, filetype);
+
+  /* Routing*/
+  if (filetype == HTML_FILE) {
+    response_bytes = HtmlResponse(client_socket, buffer, filesrc);
+  }
+
+  printf("SUCCESS sending response body to client.\n");
+  return response_bytes;
+}
+
+/**
  *  @brief  This is HTML responser function.
  *          Read the file and response to the client.
  *  @param  client_socket Request from the client socket.
- *  @param  buffer  The buffer to read from the html file.
+ *  @param  buffer  The buffer to write response body.
  *  @param  html_file The request file name.
  *  @return Return bytes of the response message.
  */
@@ -319,6 +474,8 @@ int HtmlResponse(int client_socket, char* buffer, char* html_file) {
   int byte_sum = 0, /** Total response bytes*/
       data_bytes = 0,
       buffer_length;
+
+  printf("HtmlResponse input html_file: %s\n", html_file);
 
   while(feof(pFile) == 0) {
     memset(buffer,0x00,BUFFER_SIZE);
@@ -334,7 +491,7 @@ int HtmlResponse(int client_socket, char* buffer, char* html_file) {
     }
   }
 
-  printf("SUCCESS sending response data to client.\n");
+  printf("SUCCESS sending HTML response data to client.\n");
   return byte_sum;
 }
 
