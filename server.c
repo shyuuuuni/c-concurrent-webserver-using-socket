@@ -24,6 +24,10 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 
+// /* for MAC OS execution */
+// #define _XOPEN_SOURCE  500
+// #include <unistd.h>
+
 #define SUCCESS_RESULT 0
 #define FAILURE_RESULT -1
 
@@ -83,10 +87,6 @@ typedef struct http_message {
   char* data; /** Field value*/
 } http_message;
 
-/* for MAC OS execution */
-#define _XOPEN_SOURCE  500
-#include <unistd.h>
-
 void error(char *msg);
 int GetPortNumber(int argc, char *argv[]);
 int SetupServerSocket(int portno);
@@ -96,8 +96,8 @@ int ParseHTTPRequest(http_request_line* req_header_line, http_message request_bo
 int BuildResponse(int client_socket, http_request_line* req_header_line,
                   http_message request_body[], char *buffer);
 int ResponseHeader(int client_socket, char* http_version, int code, File_t filetype, char* filesrc);
-int ResponseBody(int client_socket, char* buffer, char* filesrc, File_t filetype);
-int SendResponse(int client_socket, char* buffer, char* file_name, int is_text);
+ssize_t ResponseBody(int client_socket, char* buffer, char* filesrc, File_t filetype);
+ssize_t SendResponse(int client_socket, char* buffer, char* file_name, int is_text);
 
 /**
  *  @brief This is the main function of Concurrent-Web-Server
@@ -124,21 +124,27 @@ int main(int argc, char *argv[])
         input_buffer[BUFFER_SIZE],
         output_buffer[BUFFER_SIZE];
 
+  client_address_length = sizeof(cli_addr);
+
   /* Server start*/
   portno = GetPortNumber(argc, argv); /* Check arguments and return port number*/
   
   server_socket
   = SetupServerSocket(portno);  /* make server socket with port number*/
   
-  /* Listen for socket connections. Backlog queue (connections to wait) is 5*/
-  listen(server_socket,5);
+  // /* Listen for socket connections. Backlog queue (connections to wait) is 5*/
+  // listen(server_socket,5);
 
   // Continue connection until admin stops server.
   while (!SUCCESS_RESULT) {
+    /* Listen for socket connections. Backlog queue (connections to wait) is 5*/
+    listen(server_socket,5);
+    printf("\n[+] SUCCESS start server_socket.\n");
+
+    /* Init buffer.*/
     memset(input_buffer, 0x00, sizeof(input_buffer));
     memset(output_buffer, 0x00, sizeof(output_buffer));
 
-    client_address_length = sizeof(cli_addr);
     /*
     *  Accept connect request
     *  1)  Block until a new connection is established
@@ -151,6 +157,8 @@ int main(int argc, char *argv[])
                           &client_address_length);
     if (client_socket < 0) {  /* Failed to accept client*/
       error("[-] ERROR during accept client socket.");
+    } else {
+      printf("[+] SUCCESS accept client socket.\n");
     }
     
     /* Get request from the client*/
@@ -179,8 +187,6 @@ int main(int argc, char *argv[])
   /* Stop socket connection*/
   close(server_socket);
   printf("[+] SUCCESS closing the server socket.\n");
-  close(client_socket);
-  printf("[+] SUCCESS closing the client socket.\n");
   
   printf("[+] SUCCESS stop the web server.\n");
   return SUCCESS_RESULT; 
@@ -281,6 +287,7 @@ int SetupServerSocket(int portno) {
   }
 
   printf("[+] SUCCESS binding the server socket.\n");
+  printf("****************************************\n");
   return server_socket;
 }
 
@@ -292,12 +299,10 @@ int SetupServerSocket(int portno) {
  */
 int ListenRequest(int client_socket, char *buffer) {
   int request_bytes;
-
   memset(buffer,0x00,BUFFER_SIZE); /* Clear buffer*/
   
   /* Read request from the client socket.*/
   request_bytes = read(client_socket, buffer, BUFFER_SIZE);
-
   if (request_bytes < 0) { /* Failed to read*/
     error("[-] ERROR during reading request from client");
   }
@@ -321,19 +326,20 @@ int ParseHTTPRequest(http_request_line* req_header_line,
   char  *token,
         *rest_buffer;
   
-  /* Dump the HTTP Request (Part A)*/
-  printf("%s", buffer);
+  printf("%s", buffer); /* Dump the HTTP Request (Part A)*/
 
-  /* The http request header message*/
+  /* Seperate header and body*/
   token = strtok_r(buffer,"\n", &rest_buffer);
   if (token[strlen(token) - 1] == '\r') {
     token[strlen(token) - 1] = '\0';
   }
 
+  /* Parse and save the request header line*/
   req_header_line->action = strtok(token," ");
   req_header_line->location = strtok(NULL," ");
   req_header_line->http_version = strtok(NULL," ");
 
+  /* Parse and save the request header line*/
   for(request_body_line = 0; token != NULL; request_body_line++) {
     token = strtok_r(rest_buffer, "\n", &rest_buffer);
     request_body[request_body_line].field = strtok(token,":");
@@ -346,6 +352,7 @@ int ParseHTTPRequest(http_request_line* req_header_line,
 /**
  *  @brief  This function parses buffer to http-request-header and
  *          http-request-body.
+ *  @param  Request from the client socket.
  *  @param  req_header_line  The request header pointer.
  *  @param  request_body  The request body pointer. Use this data
  *                        if request message is needed.
@@ -354,20 +361,22 @@ int ParseHTTPRequest(http_request_line* req_header_line,
  */
 int BuildResponse(int client_socket, http_request_line* req_header_line,
                   http_message request_body[], char *buffer) {
-  int bytes = 0,  /** Response message's bytes*/
-      code; /** Response status code*/
-  char  *file_name, *file_extension;
-  char  filesrc[BUFFER_SIZE];
+  ssize_t request_body_bytes = 0;  /** Response message's bytes*/
+  int code; /** Response status code*/
+  char  *file_name, *file_extension;  /* {file_name}.{file_extension}*/
+  char  filesrc[BUFFER_SIZE]; /* Full name of file. {file_name.file_extension}*/
   File_t filetype;  /** Request file type*/
 
-  /* Save original file source*/
   memset(filesrc, 0x00, BUFFER_SIZE);
-  strcpy(filesrc, req_header_line->location + 1);
+  strcpy(filesrc, req_header_line->location + 1); /* Save original file source*/
 
   if (strcmp(req_header_line->location, "/") == 0) { /* Input is {IP}:{port}/ */
     filetype = NO_FILE;
-  } else if (strchr(req_header_line->location, '.') == NULL) { /* Non type */
-    printf("hit!%s\n", req_header_line->location);
+    // strchr(req_header_line->location, '.') == NULL
+  } else if (strchr(filesrc, '.') == NULL || 
+            filesrc[strlen(filesrc)-1] == '.' ||
+            filesrc[0] == '.') {
+    /* Input has no-type. "/{example}" or "/{example.}"*/
     file_name = filesrc;
     file_extension = NULL;
     filetype = UNKNOWN_FILE;
@@ -393,7 +402,6 @@ int BuildResponse(int client_socket, http_request_line* req_header_line,
 
   if (strcmp(req_header_line->action, "GET") == 0) {
     /* GET method inputed*/
-
     /* Set status code by request file*/
     if (filetype == NO_FILE) {
       /* Route to 'index.html', 301 Moved Permanetly*/
@@ -418,8 +426,8 @@ int BuildResponse(int client_socket, http_request_line* req_header_line,
         != SUCCESS_RESULT) {
           error("[-] ERROR during sending response header.");
         }
-    bytes = ResponseBody(client_socket, buffer, filesrc, filetype);
-    printf("[*] RESPONSE body:: %d bytes\n", bytes);
+    request_body_bytes = ResponseBody(client_socket, buffer, filesrc, filetype);
+    printf("[*] RESPONSE body:: %zd bytes\n", request_body_bytes);
   } else if (strcmp(req_header_line->action, "POST") == 0) {
     /* POST method inputed*/
   } else {  /* 400 Bad Request*/
@@ -432,26 +440,30 @@ int BuildResponse(int client_socket, http_request_line* req_header_line,
 /**
  *  @brief  This responses the http header function.
  *  @param  client_socket Request from the client socket.
+ *  @param  http_version  Request HTTP version.
+ *  @param  code  statue code number.
+ *  @param  filetype  Index of MINE types.
+ *  @param  filesrc  The request file name.
  *  @return Return 0 if successful.
  */ 
 int ResponseHeader(int client_socket, char* http_version, int code, File_t filetype, char* filesrc) {
-  char  response_header[BUFFER_SIZE];
-  char  *comment,
+  char  response_header[BUFFER_SIZE]; /** Buffer to save response header.*/
+  char  *status,
         *type_comment;
-  int response_header_size,
-      header_bytes,
-      message_size = 0,
+  int header_bytes, /** Writen file's bytes*/
+      message_size = 0, /** Number of HTTP header messages*/
       i;
-  http_message messages[MAX_LINE];
+  http_message messages[MAX_LINE];  /** Buffer's array to save response headers.*/
 
+  /* Set status message by status code.*/
   if (code == 200) {
-    comment = "OK";
+    status = "OK";
   } else if (code == 301) {
-    comment = "Moved Permanently";
+    status = "Moved Permanently";
   } else if (code == 400) {
-    comment = "Bad Request";
+    status = "Bad Request";
   } else if (code == 404) {
-    comment = "Not Found";
+    status = "Not Found";
   }
 
   if (0 < filetype && filetype < 6) { /* Known file type*/
@@ -460,23 +472,26 @@ int ResponseHeader(int client_socket, char* http_version, int code, File_t filet
     
     messages[message_size].field = "Accept-Ranges";
     messages[message_size++].data = "bytes";
-    /* To show pdf file in browser*/
-    if(filetype == PDF_FILE || filetype == MP3_FILE) {
-      char* temp = malloc(sizeof(char) * 1024);
-      sprintf(temp, "inline; filename=\"%s\"", filesrc);
+    if(filetype == PDF_FILE ||
+      filetype == MP3_FILE) { /* Display PDF/MP3 file on browser*/
+      char* content_message = malloc(sizeof(char) * 1024);
+      sprintf(content_message, "inline; filename=\"%s\"", filesrc);
       messages[message_size].field = "Content-Disposition";
-      messages[message_size++].data = temp;
+      messages[message_size++].data = content_message;
     }
-  } else {
-    type_comment = "text/plain"; /* Unknown file type*/
+  } else {  /* Unknown file type*/
+    type_comment = "text/plain";  /* Display file as text*/
   }
 
-  sprintf(response_header, "%s %d %s\n", http_version, code, comment);
+  /* Send reponse header to client and print response header.*/
+  /* Process header line*/
+  sprintf(response_header, "%s %d %s\n", http_version, code, status);
   header_bytes = write(client_socket, response_header, strlen(response_header));
   if (header_bytes < 0) { /* Failed to write*/
     error("[-] ERROR during sending header_line to client");
   }
   
+  /* Process header messages*/
   printf("[*] RESPONSE server response:\n%s", response_header);
   for(i = 0; i < message_size; i++) {
     sprintf(response_header, "%s: %s\n", messages[i].field, messages[i].data);
@@ -500,9 +515,9 @@ int ResponseHeader(int client_socket, char* http_version, int code, File_t filet
  *  @param  filetype  The content type of the file.
  *  @return Return bytes of the response message.
  */
-int ResponseBody(int client_socket, char* buffer, char* filesrc,
+ssize_t ResponseBody(int client_socket, char* buffer, char* filesrc,
                     File_t filetype) {
-  int response_bytes = 0;
+  ssize_t response_bytes = 0;
   printf("Request {%s} by method #{%d}\n", filesrc, filetype);
 
   /* Routing*/
@@ -527,77 +542,58 @@ int ResponseBody(int client_socket, char* buffer, char* filesrc,
  *  @param  is_text  1 if MINE is text type. 0 is non-text type.
  *  @return Return bytes of the response message.
  */
-int SendResponse(int client_socket, char* buffer, char* file_name, int is_text) {
-  FILE *target_file;
-  int byte_sum = 0, /** Total response bytes*/
-      data_bytes = 0,
-      buffer_length;
-  size_t file_size, sended_size = 0;
+ssize_t SendResponse(int client_socket, char* buffer, char* file_name, int is_text) {
+  FILE *target_file;  /** Request file's pointer*/
+  ssize_t byte_sum = 0, /** Total response bytes*/
+          data_bytes = 0; /** Bytes returned by write()*/
+  size_t  buffer_length,
+          file_size,  /** Total file size*/
+          sended_size = 0;
+
+  memset(buffer,0x00,BUFFER_SIZE);
 
   if (is_text) {
     target_file = fopen(file_name, "r"); /* Read as text*/
 
     /* Read each lines and send piece of message to client*/
     while(feof(target_file) == 0) {
-      memset(buffer,0x00,BUFFER_SIZE);
       fgets(buffer,BUFFER_SIZE - 2,target_file);
       
-      buffer_length = strlen(buffer);
-      data_bytes = write(client_socket, buffer, buffer_length);
-
+      // buffer_length = strlen(buffer);
+      data_bytes = write(client_socket, buffer, strlen(buffer));
       if (data_bytes < 0) { /* Failed to write*/
         error("[-] ERROR during sending data to client.");
       } else {
         byte_sum += data_bytes;
       }
     }
-    fclose(target_file);
   } else {
+    size_t read_size;
     target_file = fopen(file_name, "rb"); /* Read as binary*/
-    fseek(target_file, 0, SEEK_END);  /* Get file size*/
-    file_size = ftell(target_file);
+    fseek(target_file, 0, SEEK_END);
+    file_size = ftell(target_file);  /* Get file size*/
     fseek(target_file, 0, SEEK_SET);
     printf("%s: Total %zu bytes\n", file_name, file_size);
 
-    // size_t size2 = htonl(file_size);
-    // write(client_socket, &size2, sizeof(size2));
-
-    char buffff[BUFFER_SIZE];
-    memset(buffff,0x00,BUFFER_SIZE);
     while (sended_size != file_size) {
-      size_t tt = fread(buffff, 1, BUFFER_SIZE, target_file);
-      if(tt < 0) {
-        printf("tq");
-        exit(1);
+      read_size = fread(buffer, 1, BUFFER_SIZE, target_file);
+      if(read_size < 0) { /* Failed to read file.*/
+        error("[-] ERROR during reading file as binary.");
+      } else {
+        sended_size += read_size;
       }
       
-      sended_size = sended_size+tt;
-      data_bytes = write(client_socket, buffff, tt);
+      data_bytes = write(client_socket, buffer, read_size);
       if (data_bytes < 0) { /* Failed to write*/
         error("[-] ERROR during sending data to client.");
       } else {
         byte_sum += data_bytes;
       }
-      // printf("%zu bytes\n", sended_size);
     }
-    fclose(target_file);
-
-    // struct stat sb;
-    // int fd = open( file_name, O_RDONLY );
-    // fstat( fd, &sb );
-    // // first send the file size - NB this is not correct as it
-    // // assumes sizeof( sb.st_size ) is the same on the other 
-    // // end *and* has the same endianness
-    // write( client_socket, &sb.st_size, sizeof( sb.st_size ) );
-    // if(1) {
-    //   ssize_t bytesSent = sendfile( client_socket, fd, NULL, sb.st_size );
-    // }
-    // else {
-    //   ssize_t bytesSent = sendfile( client_socket, fd, NULL, sb.st_size );
-    // }
   }
 
-  printf("SendResponse input file_name: %s, %d Bytes\n", file_name, byte_sum);
+  fclose(target_file);
+  printf("SendResponse input file_name: %s, %zd Bytes\n", file_name, byte_sum);
 
   printf("[+] SUCCESS sending HTML response data to client.\n");
   return byte_sum;
