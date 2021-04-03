@@ -4,6 +4,7 @@
 *.o
 *.out
 server
+test_pdf.pdf
 
 # vscode conf
 .vscode
