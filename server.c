@@ -20,6 +20,10 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 
+#include <sys/uio.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+
 #define SUCCESS_RESULT 0
 #define FAILURE_RESULT -1
 
@@ -27,7 +31,7 @@
 #define MAX_PORT 65535
 
 #define MAX_LINE 255
-#define BUFFER_SIZE 1024
+#define BUFFER_SIZE 4096
 
 /** Index of MINE types*/
 #define File_t int
@@ -146,7 +150,7 @@ int main(int argc, char *argv[])
                           (struct sockaddr *) &cli_addr,
                           &client_address_length);
     if (client_socket < 0) {  /* Failed to accept client*/
-      error("ERROR during accept client socket.");
+      error("[-] ERROR during accept client socket.");
     }
     
     /* Get request from the client*/
@@ -155,30 +159,30 @@ int main(int argc, char *argv[])
     /* Parse request message to variables*/
     request_body_line = ParseHTTPRequest(&req_header_line, request_body, input_buffer);
     if (request_body_line < 0) {
-      error("ERROR request_body_line is invalid.");
+      error("[-] ERROR request_body_line is invalid.");
     } else {
-      printf("SUCCESS getting request body lines.\n");
+      printf("[+] SUCCESS getting request body lines.\n");
     }
 
     /* Build response by request and send the response message*/
     if (BuildResponse(client_socket, &req_header_line, request_body, output_buffer)
           != SUCCESS_RESULT) {
-      error("ERROR during building response."); /* Fail response*/
+      error("[-] ERROR during building response."); /* Fail response*/
     } else {
-      printf("SUCCESS finishing the connection...\n");  /* Success response*/
+      printf("[+] SUCCESS finishing the connection...\n");  /* Success response*/
     }
 
     close(client_socket);
-    printf("SUCCESS closing the client socket.\n");
+    printf("[+] SUCCESS closing the client socket.\n");
   }
 
   /* Stop socket connection*/
   close(server_socket);
-  printf("SUCCESS closing the server socket.\n");
-  // close(client_socket);
-  // printf("SUCCESS closing the client socket.\n");
+  printf("[+] SUCCESS closing the server socket.\n");
+  close(client_socket);
+  printf("[+] SUCCESS closing the client socket.\n");
   
-  printf("SUCCESS stop the web server.\n");
+  printf("[+] SUCCESS stop the web server.\n");
   return SUCCESS_RESULT; 
 }
 
@@ -209,7 +213,7 @@ int GetPortNumber(int argc, char* argv[]) {
    *      but the well-known port range 0~1023 can't be used
    */
   if (argc < 2) { /* The arguments does not contain port number*/
-    fprintf(stderr, "ERROR during starting server. Check the port number.\n");
+    fprintf(stderr, "[-] ERROR during starting server. Check the port number.\n");
     exit(1);
   } else {
     port = atoi(argv[1]); /* convert string to integer*/
@@ -220,7 +224,7 @@ int GetPortNumber(int argc, char* argv[]) {
               port);
       exit(1);
     } else if (MAX_PORT < port || port < MIN_PORT) { /* Out of range*/
-      fprintf(stderr, "ERROR, %d is unexpected port number.", port);
+      fprintf(stderr, "[-] ERROR, %d is unexpected port number.", port);
       exit(1);
     }
   }
@@ -256,7 +260,7 @@ int SetupServerSocket(int portno) {
    */ 
   server_socket = socket(AF_INET, SOCK_STREAM, 0);
   if (server_socket < 0) { /* Failed to create socket*/
-    error("ERROR during opening server socket.");
+    error("[-] ERROR during opening server socket.");
   }
 
   memset(&serv_addr, 0, sizeof(serv_addr)); /* Fill serv_addr with 0*/
@@ -273,10 +277,10 @@ int SetupServerSocket(int portno) {
   if (bind(server_socket,
           (struct sockaddr *) &serv_addr,
           sizeof(serv_addr)) < 0) { /* Failed to bind socket*/
-    error("ERROR during binding the server socket.");
+    error("[-] ERROR during binding the server socket.");
   }
 
-  printf("SUCCESS binding the server socket.\n");
+  printf("[+] SUCCESS binding the server socket.\n");
   return server_socket;
 }
 
@@ -295,10 +299,10 @@ int ListenRequest(int client_socket, char *buffer) {
   request_bytes = read(client_socket, buffer, BUFFER_SIZE);
 
   if (request_bytes < 0) { /* Failed to read*/
-    error("ERROR during reading request from client");
+    error("[-] ERROR during reading request from client");
   }
 
-  printf("SUCCESS reading request from client.\n");
+  printf("[+] SUCCESS reading request from client.\n");
   return SUCCESS_RESULT;
 }
 
@@ -360,8 +364,6 @@ int BuildResponse(int client_socket, http_request_line* req_header_line,
   memset(filesrc, 0x00, BUFFER_SIZE);
   strcpy(filesrc, req_header_line->location + 1);
 
-  printf("1)%s\n2)%s\n\n=====\n", filesrc, req_header_line->location);
-
   if (strcmp(req_header_line->location, "/") == 0) { /* Input is {IP}:{port}/ */
     filetype = NO_FILE;
   } else if (strchr(req_header_line->location, '.') == NULL) { /* Non type */
@@ -371,10 +373,7 @@ int BuildResponse(int client_socket, http_request_line* req_header_line,
     filetype = UNKNOWN_FILE;
   } else {
     /* Divide file source into {file_name}.{file_extension}*/
-    printf("before: %s\n", req_header_line->location);
-
     file_name = strtok_r(req_header_line->location, ".", &file_extension);
-    printf("\n{%s}.{%s}\n", file_name, file_extension);
     
     /* Check request file type*/
     if (strcmp(file_extension, "html") == 0) {
@@ -398,17 +397,17 @@ int BuildResponse(int client_socket, http_request_line* req_header_line,
     /* Set status code by request file*/
     if (filetype == NO_FILE) {
       /* Route to 'index.html', 301 Moved Permanetly*/
-      printf("RESPONSE route to \"/index.html\"\n");
+      printf("[*] RESPONSE route to \"/index.html\"\n");
       code = 301;
       filetype = HTML_FILE;
       strcpy(filesrc, "index.html");
     } else if (access(filesrc, F_OK) != -1) {
       /* Exist the request file, 200 OK*/
-      printf("RESPONSE \"%s\" exists\n", filesrc);
+      printf("[*] RESPONSE \"%s\" exists\n", filesrc);
       code = 200;
     } else {
       /* 404 Not Found*/
-      printf("RESPONSE \"%s\" does not exists\n", filesrc);
+      printf("[*] RESPONSE \"%s\" does not exists\n", filesrc);
       code = 404;
       filetype = HTML_FILE;
       strcpy(filesrc, "404-Not-Found.html");
@@ -417,14 +416,14 @@ int BuildResponse(int client_socket, http_request_line* req_header_line,
     /* Send response message*/
     if (ResponseHeader(client_socket, req_header_line->http_version, code, filetype, filesrc)
         != SUCCESS_RESULT) {
-          error("ERROR during sending response header.");
+          error("[-] ERROR during sending response header.");
         }
     bytes = ResponseBody(client_socket, buffer, filesrc, filetype);
-    printf("RESPONSE body:: %d bytes\n", bytes);
+    printf("[*] RESPONSE body:: %d bytes\n", bytes);
   } else if (strcmp(req_header_line->action, "POST") == 0) {
     /* POST method inputed*/
   } else {  /* 400 Bad Request*/
-    error("ERROR request header is invalid action.");
+    error("[-] ERROR request header is invalid action.");
   }
 
   return SUCCESS_RESULT;
@@ -464,8 +463,7 @@ int ResponseHeader(int client_socket, char* http_version, int code, File_t filet
     /* To show pdf file in browser*/
     if(filetype == PDF_FILE || filetype == MP3_FILE) {
       char* temp = malloc(sizeof(char) * 1024);
-      sprintf(temp, "inline");
-      // sprintf(temp, "inline; filename=\"%s\"", filesrc);
+      sprintf(temp, "inline; filename=\"%s\"", filesrc);
       messages[message_size].field = "Content-Disposition";
       messages[message_size++].data = temp;
     }
@@ -474,24 +472,23 @@ int ResponseHeader(int client_socket, char* http_version, int code, File_t filet
   }
 
   sprintf(response_header, "%s %d %s\n", http_version, code, comment);
-  printf("%s", response_header);
   header_bytes = write(client_socket, response_header, strlen(response_header));
   if (header_bytes < 0) { /* Failed to write*/
-    error("ERROR during sending header_line to client");
+    error("[-] ERROR during sending header_line to client");
   }
   
-  printf("RESPONSE %s", response_header);
+  printf("[*] RESPONSE server response:\n%s", response_header);
   for(i = 0; i < message_size; i++) {
     sprintf(response_header, "%s: %s\n", messages[i].field, messages[i].data);
     header_bytes = write(client_socket, response_header, strlen(response_header));
     printf("%s: %s\n", messages[i].field, messages[i].data);
     if (header_bytes < 0) { /* Failed to write*/
-      error("ERROR during sending header_field to client");
+      error("[-] ERROR during sending header_field to client");
     }
   }
   write(client_socket, "\n", 1); /* End of header line*/
 
-  printf("SUCCESS sending response header to client.\n");
+  printf("[+] SUCCESS sending response header to client.\n");
   return SUCCESS_RESULT;
 }
 
@@ -514,10 +511,10 @@ int ResponseBody(int client_socket, char* buffer, char* filesrc,
   } else if (GIF_FILE <= filetype && filetype <= PDF_FILE) {
     response_bytes = SendResponse(client_socket, buffer, filesrc, 0);
   } else {
-    error("ERROR routing error.");
+    error("[-] ERROR routing error.");
   }
 
-  printf("SUCCESS sending response body to client.\n");
+  printf("[+] SUCCESS sending response body to client.\n");
   return response_bytes;
 }
 
@@ -549,7 +546,7 @@ int SendResponse(int client_socket, char* buffer, char* file_name, int is_text) 
       data_bytes = write(client_socket, buffer, buffer_length);
 
       if (data_bytes < 0) { /* Failed to write*/
-        error("ERROR during sending data to client.");
+        error("[-] ERROR during sending data to client.");
       } else {
         byte_sum += data_bytes;
       }
@@ -562,29 +559,47 @@ int SendResponse(int client_socket, char* buffer, char* file_name, int is_text) 
     fseek(target_file, 0, SEEK_SET);
     printf("%s: Total %zu bytes\n", file_name, file_size);
 
+    // size_t size2 = htonl(file_size);
+    // write(client_socket, &size2, sizeof(size2));
+
     char buffff[BUFFER_SIZE];
     memset(buffff,0x00,BUFFER_SIZE);
     while (sended_size != file_size) {
       size_t tt = fread(buffff, 1, BUFFER_SIZE, target_file);
       if(tt < 0) {
+        printf("tq");
         exit(1);
       }
       
       sended_size = sended_size+tt;
       data_bytes = write(client_socket, buffff, tt);
       if (data_bytes < 0) { /* Failed to write*/
-        error("ERROR during sending data to client.");
+        error("[-] ERROR during sending data to client.");
       } else {
         byte_sum += data_bytes;
       }
+      // printf("%zu bytes\n", sended_size);
     }
-
     fclose(target_file);
+
+    // struct stat sb;
+    // int fd = open( file_name, O_RDONLY );
+    // fstat( fd, &sb );
+    // // first send the file size - NB this is not correct as it
+    // // assumes sizeof( sb.st_size ) is the same on the other 
+    // // end *and* has the same endianness
+    // write( client_socket, &sb.st_size, sizeof( sb.st_size ) );
+    // if(1) {
+    //   ssize_t bytesSent = sendfile( client_socket, fd, NULL, sb.st_size );
+    // }
+    // else {
+    //   ssize_t bytesSent = sendfile( client_socket, fd, NULL, sb.st_size );
+    // }
   }
 
   printf("SendResponse input file_name: %s, %d Bytes\n", file_name, byte_sum);
 
-  printf("SUCCESS sending HTML response data to client.\n");
+  printf("[+] SUCCESS sending HTML response data to client.\n");
   return byte_sum;
 }
 
