@@ -19,21 +19,19 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
-
 #include <sys/uio.h>
 #include <sys/stat.h>
 #include <fcntl.h>
 
-// /* for MAC OS execution */
-// #define _XOPEN_SOURCE  500
-// #include <unistd.h>
-
+/* Success and error value*/
 #define SUCCESS_RESULT 0
 #define FAILURE_RESULT -1
 
+/* Port number range*/
 #define MIN_PORT 0
 #define MAX_PORT 65535
 
+/* Limit number*/
 #define MAX_LINE 255
 #define BUFFER_SIZE 4096
 
@@ -132,59 +130,52 @@ int main(int argc, char *argv[])
   server_socket
   = SetupServerSocket(portno);  /* make server socket with port number*/
   
-  // /* Listen for socket connections. Backlog queue (connections to wait) is 5*/
-  // listen(server_socket,5);
+  /* Listen for socket connections. Backlog queue (connections to wait) is 5*/
+  listen(server_socket,5);
+  printf("\n[+] SUCCESS start server_socket.\n");
 
-  // Continue connection until admin stops server.
-  while (!SUCCESS_RESULT) {
-    /* Listen for socket connections. Backlog queue (connections to wait) is 5*/
-    listen(server_socket,5);
-    printf("\n[+] SUCCESS start server_socket.\n");
+  /* Init buffer.*/
+  memset(input_buffer, 0x00, sizeof(input_buffer));
+  memset(output_buffer, 0x00, sizeof(output_buffer));
 
-    /* Init buffer.*/
-    memset(input_buffer, 0x00, sizeof(input_buffer));
-    memset(output_buffer, 0x00, sizeof(output_buffer));
+  /*
+   *  Accept connect request
+   *  1)  Block until a new connection is established
+   *  2)  The new socket descriptor will be used for subsequent communication
+   *      with the newly connected client.
+   *      accept function returns -1 if failed to accept
+   */
+  client_socket = accept(server_socket,
+                        (struct sockaddr *) &cli_addr,
+                        &client_address_length);
+  if (client_socket < 0) {  /* Failed to accept client*/
+    error("[-] ERROR during accept client socket.");
+  } else {
+    printf("[+] SUCCESS accept client socket.\n");
+  }
+  
+  /* Get request from the client*/
+  ListenRequest(client_socket, input_buffer);
 
-    /*
-    *  Accept connect request
-    *  1)  Block until a new connection is established
-    *  2)  The new socket descriptor will be used for subsequent communication
-    *      with the newly connected client.
-    *      accept function returns -1 if failed to accept
-    */
-    client_socket = accept(server_socket,
-                          (struct sockaddr *) &cli_addr,
-                          &client_address_length);
-    if (client_socket < 0) {  /* Failed to accept client*/
-      error("[-] ERROR during accept client socket.");
-    } else {
-      printf("[+] SUCCESS accept client socket.\n");
-    }
-    
-    /* Get request from the client*/
-    ListenRequest(client_socket, input_buffer);
+  /* Parse request message to variables*/
+  request_body_line = ParseHTTPRequest(&req_header_line, request_body, input_buffer);
+  if (request_body_line < 0) {
+    error("[-] ERROR request_body_line is invalid.");
+  } else {
+    printf("[+] SUCCESS getting request body lines.\n");
+  }
 
-    /* Parse request message to variables*/
-    request_body_line = ParseHTTPRequest(&req_header_line, request_body, input_buffer);
-    if (request_body_line < 0) {
-      error("[-] ERROR request_body_line is invalid.");
-    } else {
-      printf("[+] SUCCESS getting request body lines.\n");
-    }
-
-    /* Build response by request and send the response message*/
-    if (BuildResponse(client_socket, &req_header_line, request_body, output_buffer)
-          != SUCCESS_RESULT) {
-      error("[-] ERROR during building response."); /* Fail response*/
-    } else {
-      printf("[+] SUCCESS finishing the connection...\n");  /* Success response*/
-    }
-
-    close(client_socket);
-    printf("[+] SUCCESS closing the client socket.\n");
+  /* Build response by request and send the response message*/
+  if (BuildResponse(client_socket, &req_header_line, request_body, output_buffer)
+        != SUCCESS_RESULT) {
+    error("[-] ERROR during building response."); /* Fail response*/
+  } else {
+    printf("[+] SUCCESS finishing the connection...\n");  /* Success response*/
   }
 
   /* Stop socket connection*/
+  close(client_socket);
+  printf("[+] SUCCESS closing the client socket.\n");
   close(server_socket);
   printf("[+] SUCCESS closing the server socket.\n");
   
