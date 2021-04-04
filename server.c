@@ -22,7 +22,7 @@
 #include <sys/uio.h>
 #include <sys/stat.h>
 #include <fcntl.h>
-
+#include <unistd.h>
 /* Success and error value*/
 #define SUCCESS_RESULT 0
 #define FAILURE_RESULT -1
@@ -138,24 +138,21 @@ int main(int argc, char *argv[])
   memset(input_buffer, 0x00, sizeof(input_buffer));
   memset(output_buffer, 0x00, sizeof(output_buffer));
 
-  /*
-   *  Accept connect request
-   *  1)  Block until a new connection is established
-   *  2)  The new socket descriptor will be used for subsequent communication
-   *      with the newly connected client.
-   *      accept function returns -1 if failed to accept
-   */
+  printf("*******************new******************\n");
+  /* Get request from the client*/
   client_socket = accept(server_socket,
-                        (struct sockaddr *) &cli_addr,
-                        &client_address_length);
-  if (client_socket < 0) {  /* Failed to accept client*/
+                      (struct sockaddr *) &cli_addr,
+                      &client_address_length);
+  if (client_socket <= 0) {  /* Failed to accept client*/
     error("[-] ERROR during accept client socket.");
   } else {
     printf("[+] SUCCESS accept client socket.\n");
   }
-  
-  /* Get request from the client*/
-  ListenRequest(client_socket, input_buffer);
+
+  memset(input_buffer, 0x00, BUFFER_SIZE);
+  memset(output_buffer, 0x00, BUFFER_SIZE);
+
+  ListenRequest(client_socket, input_buffer); /* Get request from the client*/
 
   /* Parse request message to variables*/
   request_body_line = ParseHTTPRequest(&req_header_line, request_body, input_buffer);
@@ -173,10 +170,9 @@ int main(int argc, char *argv[])
     printf("[+] SUCCESS finishing the connection...\n");  /* Success response*/
   }
 
-  /* Stop socket connection*/
-  close(client_socket);
+  close(client_socket);  /* Finish client socket*/
   printf("[+] SUCCESS closing the client socket.\n");
-  close(server_socket);
+  close(server_socket);  /* Finish server socket*/
   printf("[+] SUCCESS closing the server socket.\n");
   
   printf("[+] SUCCESS stop the web server.\n");
@@ -293,7 +289,7 @@ int ListenRequest(int client_socket, char *buffer) {
   memset(buffer,0x00,BUFFER_SIZE); /* Clear buffer*/
   
   /* Read request from the client socket.*/
-  request_bytes = read(client_socket, buffer, BUFFER_SIZE);
+  request_bytes = read(client_socket, buffer, BUFFER_SIZE -1);
   if (request_bytes < 0) { /* Failed to read*/
     error("[-] ERROR during reading request from client");
   }
@@ -316,7 +312,7 @@ int ParseHTTPRequest(http_request_line* req_header_line,
   int request_body_line = 0;  /* The number of request lines*/
   char  *token,
         *rest_buffer;
-  
+
   printf("%s", buffer); /* Dump the HTTP Request (Part A)*/
 
   /* Seperate header and body*/
@@ -361,9 +357,8 @@ int BuildResponse(int client_socket, http_request_line* req_header_line,
   memset(filesrc, 0x00, BUFFER_SIZE);
   strcpy(filesrc, req_header_line->location + 1); /* Save original file source*/
 
-  if (strcmp(req_header_line->location, "/") == 0) { /* Input is {IP}:{port}/ */
+  if (strcmp(req_header_line->location, "/") == 0) { /* Input is {IP}:{port}*/
     filetype = NO_FILE;
-    // strchr(req_header_line->location, '.') == NULL
   } else if (strchr(filesrc, '.') == NULL || 
             filesrc[strlen(filesrc)-1] == '.' ||
             filesrc[0] == '.') {
@@ -396,10 +391,7 @@ int BuildResponse(int client_socket, http_request_line* req_header_line,
     /* Set status code by request file*/
     if (filetype == NO_FILE) {
       /* Route to 'index.html', 301 Moved Permanetly*/
-      printf("[*] RESPONSE route to \"/index.html\"\n");
-      code = 301;
-      filetype = HTML_FILE;
-      strcpy(filesrc, "index.html");
+      error("[-] ERROR GET / failed");
     } else if (access(filesrc, F_OK) != -1) {
       /* Exist the request file, 200 OK*/
       printf("[*] RESPONSE \"%s\" exists\n", filesrc);
@@ -566,15 +558,16 @@ ssize_t SendResponse(int client_socket, char* buffer, char* file_name, int is_te
     fseek(target_file, 0, SEEK_SET);
     printf("%s: Total %zu bytes\n", file_name, file_size);
 
+    /* File send progress: sended_size/file_size(%) */
     while (sended_size != file_size) {
-      read_size = fread(buffer, 1, BUFFER_SIZE, target_file);
+      read_size = fread(buffer, 1, BUFFER_SIZE, target_file); /* read file*/
       if(read_size < 0) { /* Failed to read file.*/
         error("[-] ERROR during reading file as binary.");
       } else {
         sended_size += read_size;
       }
       
-      data_bytes = write(client_socket, buffer, read_size);
+      data_bytes = write(client_socket, buffer, read_size); /* send file*/
       if (data_bytes < 0) { /* Failed to write*/
         error("[-] ERROR during sending data to client.");
       } else {
@@ -584,7 +577,7 @@ ssize_t SendResponse(int client_socket, char* buffer, char* file_name, int is_te
   }
 
   fclose(target_file);
-  printf("SendResponse input file_name: %s, %zd Bytes\n", file_name, byte_sum);
+  printf("[+] SendResponse input file_name: %s, %zd Bytes\n", file_name, byte_sum);
 
   printf("[+] SUCCESS sending HTML response data to client.\n");
   return byte_sum;
