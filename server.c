@@ -203,26 +203,26 @@ int GetPortNumber(int argc, char* argv[]) {
    *  1)  Check the arguments contain port number
    *  2)  The port number is valid in the range 0~65535,
    *      but the well-known port range 0~1023 can't be used
-   */
-  if (argc < 2) { /* The arguments does not contain port number*/
-    fprintf(stderr, "[-] ERROR during starting server. Check the port number.\n");
-    exit(1);
-  } else {
-    port = atoi(argv[1]); /* convert string to integer*/
+  //  */
+  // if (argc < 2) { /* The arguments does not contain port number*/
+  //   fprintf(stderr, "[-] ERROR during starting server. Check the port number.\n");
+  //   exit(1);
+  // } else {
+  //   port = atoi(argv[1]); /* convert string to integer*/
 
-    if (MIN_PORT <= port && port < 1024) { /* Well-known port*/
-      fprintf(stderr, 
-              "WARNING, %d is in well-known port range.",
-              port);
-      exit(1);
-    } else if (MAX_PORT < port || port < MIN_PORT) { /* Out of range*/
-      fprintf(stderr, "[-] ERROR, %d is unexpected port number.", port);
-      exit(1);
-    }
-  }
+  //   if (MIN_PORT <= port && port < 1024) { /* Well-known port*/
+  //     fprintf(stderr, 
+  //             "WARNING, %d is in well-known port range.",
+  //             port);
+  //     exit(1);
+  //   } else if (MAX_PORT < port || port < MIN_PORT) { /* Out of range*/
+  //     fprintf(stderr, "[-] ERROR, %d is unexpected port number.", port);
+  //     exit(1);
+  //   }
+  // }
 
-  printf("Waiting for client request at port %d\n", port);
-  return port;
+  // printf("Waiting for client request at port %d\n", port);
+  return 5000;
 }
 
 /**
