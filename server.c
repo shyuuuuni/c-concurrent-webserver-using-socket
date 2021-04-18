@@ -134,44 +134,43 @@ int main(int argc, char *argv[])
   listen(server_socket,5);
   printf("\n[+] SUCCESS start server_socket.\n");
 
-  /* Init buffer.*/
-  memset(input_buffer, 0x00, sizeof(input_buffer));
-  memset(output_buffer, 0x00, sizeof(output_buffer));
+  while(1) {
+    printf("*******************new******************\n");
+    /* Get request from the client*/
+    client_socket = accept(server_socket,
+                        (struct sockaddr *) &cli_addr,
+                        &client_address_length);
+    if (client_socket <= 0) {  /* Failed to accept client*/
+      error("[-] ERROR during accept client socket.");
+    } else {
+      printf("[+] SUCCESS accept client socket.\n");
+    }
 
-  printf("*******************new******************\n");
-  /* Get request from the client*/
-  client_socket = accept(server_socket,
-                      (struct sockaddr *) &cli_addr,
-                      &client_address_length);
-  if (client_socket <= 0) {  /* Failed to accept client*/
-    error("[-] ERROR during accept client socket.");
-  } else {
-    printf("[+] SUCCESS accept client socket.\n");
+    memset(input_buffer, 0x00, BUFFER_SIZE);
+    memset(output_buffer, 0x00, BUFFER_SIZE);
+
+    ListenRequest(client_socket, input_buffer); /* Get request from the client*/
+
+    /* Parse request message to variables*/
+    request_body_line = ParseHTTPRequest(&req_header_line, request_body, input_buffer);
+    if (request_body_line < 0) {
+      error("[-] ERROR request_body_line is invalid.");
+    } else {
+      printf("[+] SUCCESS getting request body lines.\n");
+    }
+
+    /* Build response by request and send the response message*/
+    if (BuildResponse(client_socket, &req_header_line, request_body, output_buffer)
+          != SUCCESS_RESULT) {
+      error("[-] ERROR during building response."); /* Fail response*/
+    } else {
+      printf("[+] SUCCESS finishing the connection...\n");  /* Success response*/
+    }
+
+    close(client_socket);  /* Finish client socket*/
+    printf("[+] SUCCESS closing the client socket.\n");
   }
 
-  memset(input_buffer, 0x00, BUFFER_SIZE);
-  memset(output_buffer, 0x00, BUFFER_SIZE);
-
-  ListenRequest(client_socket, input_buffer); /* Get request from the client*/
-
-  /* Parse request message to variables*/
-  request_body_line = ParseHTTPRequest(&req_header_line, request_body, input_buffer);
-  if (request_body_line < 0) {
-    error("[-] ERROR request_body_line is invalid.");
-  } else {
-    printf("[+] SUCCESS getting request body lines.\n");
-  }
-
-  /* Build response by request and send the response message*/
-  if (BuildResponse(client_socket, &req_header_line, request_body, output_buffer)
-        != SUCCESS_RESULT) {
-    error("[-] ERROR during building response."); /* Fail response*/
-  } else {
-    printf("[+] SUCCESS finishing the connection...\n");  /* Success response*/
-  }
-
-  close(client_socket);  /* Finish client socket*/
-  printf("[+] SUCCESS closing the client socket.\n");
   close(server_socket);  /* Finish server socket*/
   printf("[+] SUCCESS closing the server socket.\n");
   
@@ -391,7 +390,11 @@ int BuildResponse(int client_socket, http_request_line* req_header_line,
     /* Set status code by request file*/
     if (filetype == NO_FILE) {
       /* Route to 'index.html', 301 Moved Permanetly*/
-      error("[-] ERROR GET / failed");
+      printf("[*] RESPONSE \"/\" here.\n");
+      code = 200;
+      strcpy(filesrc, "index.html");
+      filetype = HTML_FILE;
+      // error("[-] ERROR GET / failed");
     } else if (access(filesrc, F_OK) != -1) {
       /* Exist the request file, 200 OK*/
       printf("[*] RESPONSE \"%s\" exists\n", filesrc);
