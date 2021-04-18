@@ -135,22 +135,27 @@ int main(int argc, char *argv[])
   printf("\n[+] SUCCESS start server_socket.\n");
 
   while(1) {
-    printf("*******************new******************\n");
     /* Get request from the client*/
     client_socket = accept(server_socket,
                         (struct sockaddr *) &cli_addr,
                         &client_address_length);
     if (client_socket <= 0) {  /* Failed to accept client*/
       error("[-] ERROR during accept client socket.");
-    } else {
-      printf("[+] SUCCESS accept client socket.\n");
     }
+    
 
     memset(input_buffer, 0x00, BUFFER_SIZE);
     memset(output_buffer, 0x00, BUFFER_SIZE);
 
-    ListenRequest(client_socket, input_buffer); /* Get request from the client*/
+    /* Get request from the client*/
+    if (ListenRequest(client_socket, input_buffer) == 0) {
+      continue;
+    } else {
+      printf("[+] SUCCESS reading request from client.\n");
+    }
 
+    printf("*******************new******************\n");
+    
     /* Parse request message to variables*/
     request_body_line = ParseHTTPRequest(&req_header_line, request_body, input_buffer);
     if (request_body_line < 0) {
@@ -204,25 +209,25 @@ int GetPortNumber(int argc, char* argv[]) {
    *  2)  The port number is valid in the range 0~65535,
    *      but the well-known port range 0~1023 can't be used
   //  */
-  // if (argc < 2) { /* The arguments does not contain port number*/
-  //   fprintf(stderr, "[-] ERROR during starting server. Check the port number.\n");
-  //   exit(1);
-  // } else {
-  //   port = atoi(argv[1]); /* convert string to integer*/
+  if (argc < 2) { /* The arguments does not contain port number*/
+    fprintf(stderr, "[-] ERROR during starting server. Check the port number.\n");
+    exit(1);
+  } else {
+    port = atoi(argv[1]); /* convert string to integer*/
 
-  //   if (MIN_PORT <= port && port < 1024) { /* Well-known port*/
-  //     fprintf(stderr, 
-  //             "WARNING, %d is in well-known port range.",
-  //             port);
-  //     exit(1);
-  //   } else if (MAX_PORT < port || port < MIN_PORT) { /* Out of range*/
-  //     fprintf(stderr, "[-] ERROR, %d is unexpected port number.", port);
-  //     exit(1);
-  //   }
-  // }
+    if (MIN_PORT <= port && port < 1024) { /* Well-known port*/
+      fprintf(stderr, 
+              "WARNING, %d is in well-known port range.",
+              port);
+      exit(1);
+    } else if (MAX_PORT < port || port < MIN_PORT) { /* Out of range*/
+      fprintf(stderr, "[-] ERROR, %d is unexpected port number.", port);
+      exit(1);
+    }
+  }
 
-  // printf("Waiting for client request at port %d\n", port);
-  return 5000;
+  printf("Waiting for client request at port %d\n", port);
+  return port;
 }
 
 /**
@@ -293,8 +298,7 @@ int ListenRequest(int client_socket, char *buffer) {
     error("[-] ERROR during reading request from client");
   }
 
-  printf("[+] SUCCESS reading request from client.\n");
-  return SUCCESS_RESULT;
+  return request_bytes;
 }
 
 /**
