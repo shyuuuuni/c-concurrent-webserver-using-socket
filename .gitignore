@@ -1,14 +1,9 @@
-# gitignore for Computer Network Project 1
-
-# test execution file
+# Ignore Object file
 *.o
-*.out
-server
-test_pdf.pdf
 
-# vscode conf
+# VSCode configuration
 .vscode
 *.json
 
-# document conf
+# Document configuration
 .DS_Store
