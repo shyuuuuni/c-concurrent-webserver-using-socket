@@ -396,7 +396,7 @@ int BuildResponse(int client_socket, http_request_line* req_header_line,
       /* Route to 'index.html', 301 Moved Permanetly*/
       printf("[*] RESPONSE \"/\" here.\n");
       code = 200;
-      strcpy(filesrc, "index.html");
+      strcpy(filesrc, "src/index.html");
       filetype = HTML_FILE;
       // error("[-] ERROR GET / failed");
     } else if (access(filesrc, F_OK) != -1) {
@@ -408,7 +408,7 @@ int BuildResponse(int client_socket, http_request_line* req_header_line,
       printf("[*] RESPONSE \"%s\" does not exists\n", filesrc);
       code = 404;
       filetype = HTML_FILE;
-      strcpy(filesrc, "404-Not-Found.html");
+      strcpy(filesrc, "src/404.html");
     }
 
     /* Send response message*/
